@@ -1,4 +1,4 @@
-<!PYNEST html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -812,7 +812,15 @@ let files = { 'main.py': '# Welcome to PyNest!\n# A friendly Python playground �
 let activeFile = 'main.py';
 let cellEditors = [];
 let cellCount = 0;
-let installedPkgs = ['micropip'];
+// Default packages auto-installed on every load
+const DEFAULT_PACKAGES = [
+  'numpy', 'pandas', 'matplotlib', 'requests',
+  'scipy', 'sympy', 'pillow'
+];
+
+// Load saved extra packages from localStorage
+const savedExtraPkgs = JSON.parse(localStorage.getItem('pyNestExtraPkgs') || '[]');
+let installedPkgs = ['micropip', ...DEFAULT_PACKAGES];
 let apiKey = localStorage.getItem('pyNestApiKey') || '';
 let outputTab = 'console';
 
@@ -829,10 +837,10 @@ pyodideScript.onload = async () => {
       stdout: (text) => appendOutput(text, 'out'),
       stderr: (text) => appendOutput(text, 'err'),
     });
-    setProgress(70, 'Setting up environment…');
+    setProgress(40, 'Setting up environment…');
     await pyodide.loadPackage('micropip');
-    setProgress(90, 'Almost ready…');
-    // Redirect print to our output
+
+    // Redirect print to our output FIRST
     pyodide.runPython(`
 import sys, io
 class _PyNestIO(io.StringIO):
@@ -847,9 +855,26 @@ class _PyNestIO(io.StringIO):
 sys.stdout = _PyNestIO('out')
 sys.stderr = _PyNestIO('err')
 `);
-    setProgress(100, 'Ready!');
-    setTimeout(hideLoading, 500);
-    setStatus('ready', 'Python ready · Pyodide 0.25');
+
+    // Auto-install default packages
+    const micropip = pyodide.pyimport('micropip');
+    const allAutoInstall = [...DEFAULT_PACKAGES, ...savedExtraPkgs];
+    for (let i = 0; i < allAutoInstall.length; i++) {
+      const pkg = allAutoInstall[i];
+      const pct = 50 + Math.round((i / allAutoInstall.length) * 45);
+      setProgress(pct, `Installing ${pkg}…`);
+      try {
+        await micropip.install(pkg);
+        if (!installedPkgs.includes(pkg)) installedPkgs.push(pkg);
+      } catch(e) {
+        console.warn(`Could not install ${pkg}:`, e.message);
+      }
+    }
+
+    setProgress(100, 'All packages ready!');
+    renderPkgList();
+    setTimeout(hideLoading, 600);
+    setStatus('ready', `Python ready · ${installedPkgs.length - 1} packages loaded`);
   } catch(e) {
     setProgress(100, 'Error: ' + e.message);
     setStatus('error', 'Failed to load Python: ' + e.message);
@@ -942,7 +967,7 @@ function saveFile() {
   }
   renderFileList();
   setStatus('success', `Saved: ${activeFile}`);
-  setTimeout(() => setStatus('ready', 'Python ready · Pyodide 0.25'), 1500);
+  setTimeout(() => setStatus('ready', `Python ready · ${installedPkgs.length - 1} packages loaded`), 1500);
 }
 
 function deleteFile(name, e) {
@@ -1192,10 +1217,18 @@ async function installPackage() {
     for (const pkg of pkgs) {
       await micropip.install(pkg);
       if (!installedPkgs.includes(pkg)) installedPkgs.push(pkg);
+      // Save extra (non-default) packages to localStorage so they auto-install next time
+      if (!DEFAULT_PACKAGES.includes(pkg) && pkg !== 'micropip') {
+        const saved = JSON.parse(localStorage.getItem('pyNestExtraPkgs') || '[]');
+        if (!saved.includes(pkg)) {
+          saved.push(pkg);
+          localStorage.setItem('pyNestExtraPkgs', JSON.stringify(saved));
+        }
+      }
     }
     renderPkgList();
-    setStatus('success', `Installed: ${pkgs.join(', ')}`);
-    setTimeout(() => setStatus('ready', 'Python ready · Pyodide 0.25'), 2000);
+    setStatus('success', `Installed: ${pkgs.join(', ')} · Will auto-install next time ✓`);
+    setTimeout(() => setStatus('ready', `Python ready · ${installedPkgs.length - 1} packages loaded`), 2500);
   } catch(e) {
     setStatus('error', 'Install failed: ' + e.message);
     appendOutput('Package install error: ' + e.message, 'err');
@@ -1204,9 +1237,25 @@ async function installPackage() {
 
 function renderPkgList() {
   const list = document.getElementById('pkgList');
-  list.innerHTML = installedPkgs.map(pkg =>
-    `<div class="pkg-item">📦 ${pkg}<span class="pkg-badge">installed</span></div>`
-  ).join('');
+  const savedExtra = JSON.parse(localStorage.getItem('pyNestExtraPkgs') || '[]');
+  list.innerHTML = installedPkgs.map(pkg => {
+    const isDefault = DEFAULT_PACKAGES.includes(pkg) || pkg === 'micropip';
+    const isExtra = savedExtra.includes(pkg);
+    const badge = isDefault
+      ? `<span class="pkg-badge">default</span>`
+      : `<span class="pkg-badge" style="background:rgba(247,194,106,0.15);color:var(--accent3)">saved</span>`;
+    const removeBtn = !isDefault
+      ? `<button onclick="removePackage('${pkg}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;margin-left:4px;" title="Remove from auto-install">✕</button>`
+      : '';
+    return `<div class="pkg-item">📦 ${pkg}${badge}${removeBtn}</div>`;
+  }).join('');
+}
+
+function removePackage(pkg) {
+  installedPkgs = installedPkgs.filter(p => p !== pkg);
+  const saved = JSON.parse(localStorage.getItem('pyNestExtraPkgs') || '[]');
+  localStorage.setItem('pyNestExtraPkgs', JSON.stringify(saved.filter(p => p !== pkg)));
+  renderPkgList();
 }
 
 // ─── API KEY ──────────────────────────────────────────────────────────────
@@ -1239,7 +1288,7 @@ result
     // Simple client-side: just normalize indentation
     editorCM.setValue(code.replace(/\t/g, '    '));
     setStatus('success', 'Formatted!');
-    setTimeout(() => setStatus('ready', 'Python ready · Pyodide 0.25'), 1000);
+    setTimeout(() => setStatus('ready', `Python ready · ${installedPkgs.length - 1} packages loaded`), 1000);
   } catch(e) {}
 }
 
@@ -1258,7 +1307,8 @@ function setStatus(type, text) {
 }
 
 // Init packages render
-setTimeout(renderPkgList, 100);
+renderPkgList();
+setStatus('ready', 'Loading Python runtime…');
 </script>
 </body>
 </html>
