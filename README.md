@@ -14,7 +14,7 @@ A lightweight, browser-based Python coding environment. No installation needed �
 - **Keyboard shortcuts** — Ctrl+Enter to run, Ctrl+S to save
 
 ## 🚀 Live Demo
-[Click here to open the playground](https://YOUR-USERNAME.github.io/python-playground/)
+[Click here to open the playground](https://AG141293.github.io/python-playground/)
 
 ## 🛠️ Built With
 - HTML, CSS, JavaScript
